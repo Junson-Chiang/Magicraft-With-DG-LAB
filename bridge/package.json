@@ -1,0 +1,8 @@
+{
+  "name": "magicraft-dglab-bridge",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": { "start": "node main.js", "test": "node --test" },
+  "dependencies": { "dglab-kit": "1.0.5", "qrcode-terminal": "0.12.0" }
+}

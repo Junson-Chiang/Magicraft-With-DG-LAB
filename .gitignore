@@ -1,0 +1,6 @@
+tools/
+dist/
+*.user
+node_modules/
+.npm-cache/
+bridge/config.json

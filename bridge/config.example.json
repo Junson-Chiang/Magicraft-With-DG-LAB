@@ -1,0 +1,38 @@
+{
+  "relayUrl": "wss://trex.dungeon-lab.cn/v4",
+  "udpPort": 17891,
+  "httpPort": 17892,
+  "collectorTimeoutMs": 5000,
+  "channels": {
+    "A": {
+      "mergeDamage": false,
+      "mergeWindowMs": 500,
+      "enabled": true,
+      "minIntensity": 0,
+      "maxIntensity": 0,
+      "fullScaleDamageRatio": 0.2,
+      "durationMs": 1000,
+      "cooldownMs": 500,
+      "deathFeedback": true,
+      "deathDurationMs": 3000,
+      "sources": [
+        "enemy"
+      ]
+    },
+    "B": {
+      "mergeDamage": false,
+      "mergeWindowMs": 500,
+      "enabled": true,
+      "minIntensity": 0,
+      "maxIntensity": 0,
+      "fullScaleDamageRatio": 0.2,
+      "durationMs": 1000,
+      "cooldownMs": 500,
+      "deathFeedback": false,
+      "deathDurationMs": 3000,
+      "sources": [
+        "trap"
+      ]
+    }
+  }
+}
