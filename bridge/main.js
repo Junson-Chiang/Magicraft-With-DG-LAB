@@ -1,3 +1,5 @@
+import { WAVEFORMS, EVENT_LABELS } from './features.js';
+import { Presets } from './presets.js';
 import dgram from 'node:dgram';
 import http from 'node:http';
 import { readFile, writeFile } from 'node:fs/promises';
@@ -17,6 +19,8 @@ catch (error) {
   await writeFile(configPath, configText, { flag: 'wx' });
 }
 const config = validateConfig(normalizeConfig(JSON.parse(configText)));
+const presetPath = process.env.MAGICRAFT_BRIDGE_PRESETS || new URL('./presets.json', import.meta.url);
+const presets = new Presets(presetPath,config); await presets.init();
 const page = await readFile(new URL('./panel.html', import.meta.url));
 const token = process.env.MAGICRAFT_BRIDGE_TOKEN || randomBytes(24).toString('hex');
 const logs = [];
@@ -117,7 +121,7 @@ function status() {
     devices: [...devices].flatMap(([clientId, list]) => list.map(d => ({ ...d, clientId }))),
     enabled: engine.enabled, paused: engine.paused, reason: engine.reason,
     scene: engine.scene, snapshot: engine.snapshot, lastSeen: engine.lastSeen,
-    sequence: engine.sequence, lastDamage: engine.lastDamage, logs };
+    waveforms:WAVEFORMS,eventLabels:EVENT_LABELS,presets:presets.list(),history:engine.history,mergePreview:engine.preview(),sequence: engine.sequence, lastDamage: engine.lastDamage, logs };
 }
 function authenticated(req) {
   const supplied = Buffer.from(req.headers['x-control-token'] ?? '');
@@ -137,11 +141,14 @@ async function command(action, body) {
     await output.stop('选择设备后归零');
     return;
   }
+  if(action==='preset-save')return presets.save(body.name,body.channels);
+  if(action==='preset-delete')return presets.remove(body.id);
+  if(action==='preset-apply')return command('configure',{channels:presets.channels(body.id)});
   if (action === 'configure') {
     const allowed = ['channels', 'relayUrl'];
     const next = { ...config };
     for (const key of allowed) if (Object.hasOwn(body, key)) next[key] = body[key];
-    validateConfig(next);
+    normalizeConfig(next); validateConfig(next);
     await engine.halt('配置已更新，需要重新启用');
     if (next.relayUrl !== config.relayUrl) output.select(null);
     await writeFile(configPath, JSON.stringify(next, null, 2) + '\n');
@@ -185,7 +192,7 @@ const server = http.createServer(async (req, res) => {
   if (action !== 'stop') mutationBusy = true;
   try {
     let text = '';
-    for await (const chunk of req) { text += chunk; if (text.length > 8192) throw new Error('请求过大'); }
+    for await (const chunk of req) { text += chunk; if (text.length > 32768) throw new Error('请求过大'); }
     await command(action, text ? JSON.parse(text) : {});
     res.end(JSON.stringify({ ok: true }));
   } catch (error) { res.writeHead(400).end(JSON.stringify({ error: error.message })); }

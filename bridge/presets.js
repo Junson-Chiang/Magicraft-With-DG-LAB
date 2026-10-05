@@ -1,0 +1,10 @@
+import {readFile,writeFile} from 'node:fs/promises';
+import {normalizeConfig,validateConfig} from './rules.js';
+export class Presets {
+ constructor(path,config){this.path=path;this.config=config;this.items=[];}
+ async init(){try{this.items=JSON.parse(await readFile(this.path,'utf8'));if(!Array.isArray(this.items)||this.items.length>20)throw Error('预设文件无效');for(const i of this.items){if(typeof i.name!=='string'||i.name.length>40)throw Error('预设名称无效');i.channels=validateConfig(normalizeConfig({...this.config,channels:i.channels})).channels;}}catch(e){if(e.code!=='ENOENT')throw e;}}
+ list(){return [{id:'builtin:split',name:'敌人与陷阱分流（保留强度）'},{id:'builtin:gentle',name:'轻量体验（降低现有上限）'},...this.items.map(i=>({id:i.name,name:i.name}))];}
+ channels(id){const channels=structuredClone(this.config.channels);if(id==='builtin:split'||id==='builtin:gentle'){channels.A.sources=['enemy'];channels.B.sources=['trap'];for(const c of ['A','B']){channels[c].enabled=true;if(id==='builtin:gentle'){channels[c].minIntensity=0;channels[c].maxIntensity=Math.min(channels[c].maxIntensity,5);channels[c].durationMs=300;channels[c].deathFeedback=false;channels[c].lowHealthEnabled=false;for(const e of Object.values(channels[c].eventFeedback))e.enabled=false;}}return channels;}const p=this.items.find(i=>i.name===id);if(!p)throw Error('预设不存在');return structuredClone(p.channels);}
+ async save(name,channels){if(typeof name!=='string'||!name.trim()||name.length>40||name.startsWith('builtin:'))throw Error('预设名称需为1–40字');name=name.trim();const next=this.items.filter(i=>i.name!==name);if(next.length>=20)throw Error('最多保存20个预设');const rules=validateConfig(normalizeConfig({...this.config,channels:structuredClone(channels)})).channels;next.push({name,channels:rules});await writeFile(this.path,JSON.stringify(next,null,2)+'\n');this.items=next;}
+ async remove(id){const next=this.items.filter(i=>i.name!==id);if(next.length===this.items.length)throw Error('只能删除自定义预设');await writeFile(this.path,JSON.stringify(next,null,2)+'\n');this.items=next;}
+}

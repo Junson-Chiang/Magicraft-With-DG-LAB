@@ -1,7 +1,7 @@
+import { WAVEFORMS, EVENT_LABELS, extendRule, modifiers } from './features.js';
 export const SOURCE_LABELS = { enemy: '敌人攻击', trap: '陷阱伤害', self: '自己或友方造成的伤害', dot: '中毒 / 灼烧（来源不明）', unknown: '其他 / 来源不明' };
 export function normalizeConfig(c) {
-  if (c.channels && ['A', 'B'].every(k => c.channels[k]?.mergeDamage !== undefined && c.channels[k]?.mergeWindowMs !== undefined)) return c;
-  if (c.channels) return { ...c, channels: Object.fromEntries(['A', 'B'].map(k => [k, { mergeDamage: false, mergeWindowMs: 500, ...c.channels[k] }])) };
+  if (c.channels) { for (const k of ['A','B']) c.channels[k]=extendRule({mergeDamage:false,mergeWindowMs:500,...c.channels[k]}); return c; }
   const legacy = { enabled: true, minIntensity: c.minIntensity ?? 0, maxIntensity: c.maxIntensity ?? 0,
     fullScaleDamageRatio: c.fullScaleDamageRatio ?? 0.2, durationMs: c.durationMs ?? 1000, cooldownMs: c.cooldownMs ?? 500,
     deathFeedback: true, deathDurationMs: c.deathDurationMs ?? 3000 };
@@ -29,6 +29,11 @@ export function validateConfig(c) {
       ['fullScaleDamageRatio', 0.01, 1, false], ['mergeWindowMs', 100, 10000, true], ['durationMs', 100, 3000, true], ['cooldownMs', 100, 3000, true], ['deathDurationMs', 100, 3000, true]]) {
       if (!Number.isFinite(rule[key]) || rule[key] < lo || rule[key] > hi || (integer && !Number.isInteger(rule[key]))) throw new Error(`${channel} 通道 ${key} 设置无效 (${lo}–${hi})`);
     }
+    for(const key of ['lowHealthEnabled']) if(typeof rule[key]!=='boolean') throw Error(channel+' 低血量开关无效');
+    for(const [key,lo,hi] of [['lowHealthThreshold',0.01,1],['lowHealthMultiplier',1,5]]) if(!Number.isFinite(rule[key])||rule[key]<lo||rule[key]>hi)throw Error(channel+' '+key+' 无效');
+    for(const k of ['Monster','Elite','Boss']) if(!Number.isFinite(rule.enemyMultipliers?.[k])||rule.enemyMultipliers[k]<0||rule.enemyMultipliers[k]>5)throw Error(channel+' 敌人倍率无效');
+    for(const k of Object.keys(SOURCE_LABELS)) if(!Object.hasOwn(WAVEFORMS,rule.waveforms?.[k]))throw Error(channel+' 波形无效');
+    for(const k of Object.keys(EVENT_LABELS)) {const e=rule.eventFeedback?.[k]; if(!e||typeof e.enabled!=='boolean'||!Number.isInteger(e.intensity)||e.intensity<0||e.intensity>100||!Number.isInteger(e.durationMs)||e.durationMs<100||e.durationMs>3000||!Object.hasOwn(WAVEFORMS,e.waveform))throw Error(channel+' 事件设置无效');}
     if (rule.minIntensity > rule.maxIntensity) throw new Error(`${channel} 通道最低强度不能超过最高强度`);
   }
   const url = new URL(c.relayUrl);
@@ -50,6 +55,8 @@ export class RuleEngine {
     this.config = validateConfig(normalizeConfig(config));
     this.output = output;
     this.now = now;
+    this.history = [];
+    this.eventKeys = new Set();
     this.enabled = false;
     this.session = null;
     this.sequence = 0;
@@ -61,7 +68,22 @@ export class RuleEngine {
     this.resetChannels();
     this.reason = '等待游戏事件';
   }
+  record(channel, outcome, detail, extra={}) { this.history.push({at:this.now(),channel,outcome,detail,...extra}); if(this.history.length>100)this.history.shift(); }
+  preview() {return Object.fromEntries(['A','B'].map(c=>{const b=this.channelState[c].batch;return[c,b?{count:b.count,ratio:b.ratio,remainingMs:Math.max(0,b.until-this.now()),intensity:damageIntensity({hpDamage:b.weightedRatio,maxHp:1},this.config.channels[c]).intensity,waveform:b.waveform}:null]}));}
+  feedbackEvent(key,d,terminal=false) {
+    const id=key+':'+(d.stage??'')+':'+(d.level??'')+':'+(d.roomKey??d.roomId??'');
+    if(this.eventKeys.has(id))return;
+    this.eventKeys.add(id); if(this.eventKeys.size>256)this.eventKeys.delete(this.eventKeys.values().next().value);
+    const can=this.enabled&&!this.paused&&!this.dead&&this.now()-this.lastSnapshot<=this.config.collectorTimeoutMs;
+    if(terminal)this.halt('本局通关，联动已关闭');
+    for(const c of ['A','B']) {const r=this.config.channels[c],e=r.eventFeedback[key]; const intensity=Math.min(r.maxIntensity,e.intensity);
+      if(can&&r.enabled&&e.enabled&&intensity>0){const s=this.channelState[c];s.batch=null;s.activeUntil=this.now()+e.durationMs;s.activeIntensity=intensity;s.lastHit=this.now();this.output.play(intensity,e.durationMs,EVENT_LABELS[key],c,e.waveform);this.record(c,'已下发',EVENT_LABELS[key],{intensity,waveform:e.waveform});}
+      else this.record(c,'未输出',EVENT_LABELS[key]+'：'+(!can?'联动未开启、暂停或快照超时':!e.enabled?'事件反馈未开启':'通道关闭或强度为 0'));
+    }
+  }
   halt(reason, disable = true) {
+    if(this.enabled)for(const c of ['A','B'])this.record(c,'已停止',reason);
+    if(this.channelState)for(const c of ['A','B'])if(this.channelState[c].batch)this.record(c,'已取消',reason);
     if (disable) this.enabled = false;
     this.resetChannels();
     this.reason = reason;
@@ -87,12 +109,13 @@ export class RuleEngine {
     if (!batch || this.now() < batch.until) return;
     state.batch = null;
     if (!rule.enabled || !rule.mergeDamage || rule.maxIntensity <= 0) return;
-    const mapped = damageIntensity({ hpDamage: batch.ratio, maxHp: 1 }, rule);
+    const mapped = damageIntensity({ hpDamage: batch.weightedRatio, maxHp: 1 }, rule);
     this.reason = `${channel} 通道 · 合并 ${batch.count} 次受伤 ${(batch.ratio * 100).toFixed(1)}% → 强度 ${mapped.intensity}`;
     state.lastHit = this.now();
     state.activeUntil = this.now() + rule.durationMs;
     state.activeIntensity = mapped.intensity;
-    if (mapped.intensity > 0) this.output.play(mapped.intensity, rule.durationMs, this.reason, channel);
+    if (mapped.intensity > 0) this.output.play(mapped.intensity, rule.durationMs, this.reason, channel, batch.waveform);
+    this.record(channel,'已下发',this.reason,{intensity:mapped.intensity,waveform:batch.waveform});
   }
   accept(frame) {
     const now = this.now();
@@ -107,6 +130,7 @@ export class RuleEngine {
       if (this.session) this.retired.add(this.session);
       this.session = frame.sessionId;
       this.sequence = 0;
+      this.eventKeys.clear();
       this.lastSnapshot = 0;
       this.paused = true;
       this.dead = false;
@@ -133,12 +157,18 @@ export class RuleEngine {
         if (d.hp <= 0) this.dead = true;
       }
     }
-    if (frame.event === 'battle.initialized') this.dead = false;
+    if (frame.event === 'battle.initialized') {this.dead = false;this.eventKeys.clear();}
     if (frame.event === 'battle.exited') { this.halt('主动退出本局，联动已关闭'); return true; }
     if (this.scene !== 'Battle') {
       this.dead = false;
       if (this.enabled || Object.values(this.channelState).some(s => s.activeUntil) || this.reason !== '已离开战斗') this.halt('已离开战斗');
       return true;
+    }
+    if(frame.event==='room.entered'&&d.hasBossFight===true)this.feedbackEvent('bossEntered',d);
+    if(frame.event==='chapter.completed')this.feedbackEvent('chapterCompleted',d);
+    if(frame.event==='battle.victory'){if(d.confirmedVictory===true)this.feedbackEvent('victory',d,true);return true;}
+    if(frame.event==='room.completed'){
+      this.halt('房间完成',false);this.feedbackEvent(d.hasBossFight===true?'bossCompleted':'roomCompleted',d);return true;
     }
     if (['collector.stopped', 'room.completed', 'room.left'].includes(frame.event)) {
       this.halt({ 'collector.stopped': '采集插件已停止', 'room.completed': '房间完成', 'room.left': '离开房间' }[frame.event], frame.event === 'collector.stopped'); return true;
@@ -150,7 +180,10 @@ export class RuleEngine {
       this.halt('玩家死亡，联动已关闭');
       if (canPlay) for (const channel of ['A', 'B']) {
         const rule = this.config.channels[channel];
-        if (rule.enabled && rule.deathFeedback && rule.maxIntensity > 0) this.output.play(rule.maxIntensity, rule.deathDurationMs, `${channel} 通道死亡反馈`, channel);
+        if (rule.enabled && rule.deathFeedback && rule.maxIntensity > 0) {
+          this.output.play(rule.maxIntensity, rule.deathDurationMs, `${channel} 通道死亡反馈`, channel);
+          this.record(channel,'已下发','死亡反馈',{intensity:rule.maxIntensity,waveform:'BUBBLE'});
+        }
       }
       return true;
     }
@@ -158,31 +191,37 @@ export class RuleEngine {
     if (d.attackerType === 'FromUI') { this.halt('主动退出本局，联动已关闭'); return true; }
     const source = d.isTrap === true ? 'trap' : Object.hasOwn(SOURCE_LABELS, d.damageType) ? d.damageType : 'unknown';
     this.lastDamage = { source, label: SOURCE_LABELS[source], hpDamage: d.hpDamage, maxHp: d.maxHp, at: now };
-    if (!this.enabled || this.paused || this.dead) return true;
+    if (!this.enabled || this.paused || this.dead) {for(const c of ['A','B'])this.record(c,'未输出',!this.enabled?'联动未开启':this.paused?'游戏暂停':'玩家已死亡',{source});return true;}
     if (!this.lastSnapshot || now - this.lastSnapshot > this.config.collectorTimeoutMs) { this.halt('玩家快照超时'); return true; }
     for (const channel of ['A', 'B']) {
       const rule = this.config.channels[channel], state = this.channelState[channel];
-      if (!rule.enabled || !rule.sources.includes(source)) continue;
-      const mapped = damageIntensity(d, rule);
-      if (!mapped || rule.maxIntensity <= 0) continue;
+      if (!rule.enabled || !rule.sources.includes(source)) {this.record(channel,'未输出',!rule.enabled?'通道关闭':'此伤害来源未勾选',{source});continue;}
+      const raw=damageIntensity(d,rule), mod=modifiers({...d,damageType:source},rule,this.snapshot);
+      const mapped=raw&&damageIntensity({hpDamage:raw.ratio*mod.multiplier,maxHp:1},rule);
+      const waveform=rule.waveforms[source];
+      if (!mapped || rule.maxIntensity <= 0) {this.record(channel,'未输出',!mapped?'无有效生命伤害（可能仅护盾受伤）':'最高强度为 0',{source});continue;}
       if (rule.mergeDamage) {
         this.flushBatch(channel);
-        if (!state.batch) state.batch = { until: now + rule.mergeWindowMs, ratio: 0, count: 0 };
-        state.batch.ratio += mapped.ratio;
+        if (!state.batch) state.batch = { until: now + rule.mergeWindowMs, ratio: 0, weightedRatio:0, waveform, count: 0 };
+        state.batch.ratio += raw.ratio;
+        state.batch.weightedRatio += mapped.ratio;
+        if(!state.batch.strongest||mapped.ratio>state.batch.strongest){state.batch.strongest=mapped.ratio;state.batch.waveform=waveform;}
         state.batch.count++;
         this.reason = `${channel} 通道 · 正在合并受伤，等待 ${rule.mergeWindowMs / 1000} 秒窗口结束`;
+        this.record(channel,'合并中',this.reason,{source,multiplier:mod.multiplier});
         continue;
       }
-      if (mapped.intensity <= 0) continue;
+      if (mapped.intensity <= 0) {this.record(channel,'未输出','倍率或计算强度为 0',{source});continue;}
       const withinCooldown = now - state.lastHit < rule.cooldownMs;
       const active = now < state.activeUntil;
-      if ((withinCooldown || active) && mapped.intensity <= state.activeIntensity) continue;
+      if ((withinCooldown || active) && mapped.intensity <= state.activeIntensity) {this.record(channel,'未输出','冷却或正在反馈，强度未提高',{source,intensity:mapped.intensity});continue;}
       const duration = active ? Math.max(1, state.activeUntil - now) : rule.durationMs;
       if (!active) state.activeUntil = now + duration;
       state.activeIntensity = mapped.intensity;
       state.lastHit = now;
       this.reason = `${channel} 通道 · ${SOURCE_LABELS[source]} ${(mapped.ratio * 100).toFixed(1)}% → 强度 ${mapped.intensity}`;
-      this.output.play(mapped.intensity, duration, this.reason, channel);
+      this.output.play(mapped.intensity, duration, this.reason, channel,waveform);
+      this.record(channel,'已下发',this.reason,{source,intensity:mapped.intensity,waveform,multiplier:mod.multiplier});
     }
     return true;
   }

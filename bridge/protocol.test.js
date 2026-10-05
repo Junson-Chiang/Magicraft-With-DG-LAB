@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { WebSocketServer } from 'ws';
-import { DglabSocket } from 'dglab-kit';
+import { DglabSocket, COYOTE_WAVEFORMS } from 'dglab-kit';
 import { DeviceOutput } from './device-output.js';
 test('actual V4 SDK discovers simulated APP and sends RPC tasks with correct target/channel', async () => {
   const relay = new WebSocketServer({ host: '127.0.0.1', port: 0 });
@@ -33,7 +33,7 @@ test('actual V4 SDK discovers simulated APP and sends RPC tasks with correct tar
     assert.equal((await socket.requestDevices('app')).devices[0].slotId, 'device');
     const output = new DeviceOutput(socket, () => {}, () => {});
     output.select({ clientId: 'app', slotId: 'device', channel: 'B' });
-    await output.play(13, 1000, 'test', 'B');
+    await output.play(13, 1000, 'test', 'B', 'PULSE');
     await new Promise(resolve => setTimeout(resolve, 30));
     assert.equal(output.lastError, null);
     const operations = frames.filter(f => f.data.m === 'device.op');
@@ -44,6 +44,7 @@ test('actual V4 SDK discovers simulated APP and sends RPC tasks with correct tar
       assert.equal(f.data.data.c, 1);
     }
     assert.equal(operations.at(-1).data.data.v, 13);
+    assert.deepEqual(operations.find(f=>f.data.data.t===0).data.data.v,COYOTE_WAVEFORMS.PULSE.raw);
     assert.ok(operations.at(-1).data.data.d <= 1000);
     await output.stop('test stop');
     assert.equal(frames.at(-1).data.data.v, 0);

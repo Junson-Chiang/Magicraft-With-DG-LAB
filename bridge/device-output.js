@@ -18,10 +18,10 @@ export class ChannelOutput {
     this.pending = this.target ? { kind: 'stop', target: { ...this.target }, generation: this.generation, reason } : null;
     return this.drain();
   }
-  play(intensity, duration, reason) {
+  play(intensity, duration, reason, waveform = 'BUBBLE') {
     if (!this.target) return;
     this.pending = { kind: 'play', target: { ...this.target }, generation: ++this.generation,
-      intensity, deadline: Date.now() + duration, reason };
+      intensity, waveform, deadline: Date.now() + duration, reason };
     return this.drain();
   }
   drain() {
@@ -53,7 +53,7 @@ export class ChannelOutput {
           this.onError(error, true);
           this.stop('设备任务失败后归零');
         });
-        observe(this.socket.sendPulse(clientId, slotId, c, remaining, COYOTE_WAVEFORMS[COYOTE_WAVEFORM.BUBBLE].raw,
+        observe(this.socket.sendPulse(clientId, slotId, c, remaining, COYOTE_WAVEFORMS[job.waveform]?.raw ?? COYOTE_WAVEFORMS[COYOTE_WAVEFORM.BUBBLE].raw,
           { immediate: true, timeout: remaining + 1500 }));
         if (!valid()) continue;
         observe(this.socket.setTempIntensity(clientId, slotId, c, job.intensity, remaining,
@@ -88,5 +88,5 @@ export class DeviceOutput {
   }
   get lastError() { return this.workers.A.lastError || this.workers.B.lastError; }
   stop(reason) { return Promise.all(['A', 'B'].map(channel => this.workers[channel].stop(reason))); }
-  play(intensity, duration, reason, channel = 'A') { return this.workers[channel].play(intensity, duration, reason); }
+  play(intensity, duration, reason, channel = 'A', waveform = 'BUBBLE') { return this.workers[channel].play(intensity, duration, reason, waveform); }
 }

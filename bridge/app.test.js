@@ -47,7 +47,7 @@ test('whole bridge receives UDP events, pairs V4 APP and enforces HTTP controls'
     });
   });
   const child = spawn(process.execPath, [new URL('./main.js', import.meta.url).pathname.replace(/^\/(\w:)/, '$1')],
-    { env: { ...process.env, MAGICRAFT_BRIDGE_CONFIG: path }, stdio: ['ignore', 'pipe', 'pipe'] });
+    { env: { ...process.env, MAGICRAFT_BRIDGE_CONFIG: path, MAGICRAFT_BRIDGE_PRESETS: join(folder,'presets.json') }, stdio: ['ignore', 'pipe', 'pipe'] });
   let text = '';
   child.stdout.on('data', chunk => text += chunk);
   child.stderr.on('data', chunk => text += chunk);
@@ -69,6 +69,13 @@ test('whole bridge receives UDP events, pairs V4 APP and enforces HTTP controls'
     config.channels.A.maxIntensity = 20;
     config.channels.B.maxIntensity = 20;
     await api('/command/configure', { channels: config.channels });
+    await api('/command/preset-save', { name:'integration',channels:config.channels });
+    assert.equal((await api('/status')).presets.length,3);
+    await api('/command/preset-apply', { id:'builtin:gentle' });
+    assert.equal((await api('/status')).config.channels.A.maxIntensity,5);
+    await api('/command/preset-apply', { id:'integration' });
+    assert.equal((await api('/status')).config.channels.A.maxIntensity,20);
+    await api('/command/preset-delete', { id:'integration' });
     let sequence = 0;
     const send = async (event, data) => {
       const frame = { schemaVersion: 1, source: 'magicraft', sessionId: 'smoke', sequence: ++sequence,
@@ -90,6 +97,7 @@ test('whole bridge receives UDP events, pairs V4 APP and enforces HTTP controls'
     assert.equal((await api('/status')).enabled, false);
     const count = frames.filter(f => f.data.m === 'device.op' && f.data.data.t === 4).length;
     await send('player.damaged', { hpDamage: 20, maxHp: 100 });
+    assert.match((await api('/status')).history.at(-1).detail,/联动未开启/);
     await new Promise(r => setTimeout(r, 50));
     assert.equal(frames.filter(f => f.data.m === 'device.op' && f.data.data.t === 4).length, count);
   } finally {

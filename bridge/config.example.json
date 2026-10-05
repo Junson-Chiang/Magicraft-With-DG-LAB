@@ -5,6 +5,53 @@
   "collectorTimeoutMs": 5000,
   "channels": {
     "A": {
+      "lowHealthEnabled": false,
+      "lowHealthThreshold": 0.3,
+      "lowHealthMultiplier": 1.5,
+      "enemyMultipliers": {
+        "Monster": 1,
+        "Elite": 1,
+        "Boss": 1
+      },
+      "waveforms": {
+        "enemy": "BUBBLE",
+        "trap": "BUBBLE",
+        "self": "BUBBLE",
+        "dot": "BUBBLE",
+        "unknown": "BUBBLE"
+      },
+      "eventFeedback": {
+        "bossEntered": {
+          "enabled": false,
+          "intensity": 0,
+          "durationMs": 1000,
+          "waveform": "BUBBLE"
+        },
+        "roomCompleted": {
+          "enabled": false,
+          "intensity": 0,
+          "durationMs": 1000,
+          "waveform": "BUBBLE"
+        },
+        "bossCompleted": {
+          "enabled": false,
+          "intensity": 0,
+          "durationMs": 1000,
+          "waveform": "BUBBLE"
+        },
+        "chapterCompleted": {
+          "enabled": false,
+          "intensity": 0,
+          "durationMs": 1000,
+          "waveform": "BUBBLE"
+        },
+        "victory": {
+          "enabled": false,
+          "intensity": 0,
+          "durationMs": 1000,
+          "waveform": "BUBBLE"
+        }
+      },
       "mergeDamage": false,
       "mergeWindowMs": 500,
       "enabled": true,
@@ -20,6 +67,53 @@
       ]
     },
     "B": {
+      "lowHealthEnabled": false,
+      "lowHealthThreshold": 0.3,
+      "lowHealthMultiplier": 1.5,
+      "enemyMultipliers": {
+        "Monster": 1,
+        "Elite": 1,
+        "Boss": 1
+      },
+      "waveforms": {
+        "enemy": "BUBBLE",
+        "trap": "BUBBLE",
+        "self": "BUBBLE",
+        "dot": "BUBBLE",
+        "unknown": "BUBBLE"
+      },
+      "eventFeedback": {
+        "bossEntered": {
+          "enabled": false,
+          "intensity": 0,
+          "durationMs": 1000,
+          "waveform": "BUBBLE"
+        },
+        "roomCompleted": {
+          "enabled": false,
+          "intensity": 0,
+          "durationMs": 1000,
+          "waveform": "BUBBLE"
+        },
+        "bossCompleted": {
+          "enabled": false,
+          "intensity": 0,
+          "durationMs": 1000,
+          "waveform": "BUBBLE"
+        },
+        "chapterCompleted": {
+          "enabled": false,
+          "intensity": 0,
+          "durationMs": 1000,
+          "waveform": "BUBBLE"
+        },
+        "victory": {
+          "enabled": false,
+          "intensity": 0,
+          "durationMs": 1000,
+          "waveform": "BUBBLE"
+        }
+      },
       "mergeDamage": false,
       "mergeWindowMs": 500,
       "enabled": true,

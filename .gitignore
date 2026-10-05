@@ -4,3 +4,4 @@ dist/
 node_modules/
 .npm-cache/
 bridge/config.json
+bridge/presets.json

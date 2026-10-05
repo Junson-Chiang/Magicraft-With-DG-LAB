@@ -9,7 +9,7 @@ using UnityEngine.SceneManagement;
 
 namespace MagicraftEvents
 {
-    [BepInPlugin(Id, "Magicraft Event Collector", "0.4.0")]
+    [BepInPlugin(Id, "Magicraft Event Collector", "0.5.0")]
     public sealed class Plugin : BaseUnityPlugin
     {
         public const string Id = "local.magicraft.eventcollector";
@@ -39,9 +39,11 @@ namespace MagicraftEvents
             Hook("BattleMgr", "Start_Normal", null, "BattleInitialized", 0);
             Hook("UIPlayerDead", "OnShow", null, "PlayerDeath", 1);
             Hook("UIMenu", "_MenuQuitYes", "VoluntaryExit", null, 0);
+            Hook("UIChapterThrough", "Show", "ChapterCompleted", null, 2);
+            Hook("UIBattleMgr", "PopoutCurrentFinishBuild", "Victory", null, 1);
             SceneManager.activeSceneChanged += SceneChanged;
-            Emit("collector.started", new Dictionary<string, object> { { "pluginVersion", "0.4.0" }, { "gameVersion", Application.version }, { "hooks", activeHooks.ToArray() } });
-            Logger.LogInfo("Event collector ready: " + activeHooks.Count + "/7 hooks. UDP 127.0.0.1:" + port.Value);
+            Emit("collector.started", new Dictionary<string, object> { { "pluginVersion", "0.5.0" }, { "gameVersion", Application.version }, { "hooks", activeHooks.ToArray() } });
+            Logger.LogInfo("Event collector ready: " + activeHooks.Count + "/9 hooks. UDP 127.0.0.1:" + port.Value);
         }
 
         private void Hook(string type, string method, string prefix, string postfix, int argumentCount)
@@ -183,6 +185,7 @@ namespace MagicraftEvents
         {
             var cfg = Read(room, "roomCfg");
             return new Dictionary<string, object> { { "roomId", Read(cfg, "id") },
+                { "roomKey", room is UnityEngine.Object ? ((UnityEngine.Object)room).GetInstanceID().ToString() : "" },
                 { "roomType", Convert.ToString(Read(cfg, "type")) }, { "theme", Convert.ToString(Read(cfg, "themeType")) },
                 { "hasBossFight", Read(room, "hasBossFight") } };
         }
@@ -241,6 +244,16 @@ namespace MagicraftEvents
         public static void PlayerDeath() { Safe(delegate {
             if (Plugin.Instance.voluntaryExit) return;
             Plugin.Instance.Emit("player.died", new Dictionary<string, object> { { "confirmedDeath", true } });
+        }); }
+        public static void ChapterCompleted(object[] __args) { Safe(delegate {
+            if (Plugin.Instance.voluntaryExit || SceneManager.GetActiveScene().name != "Battle") return;
+            Plugin.Instance.Emit("chapter.completed", new Dictionary<string, object> { { "chapter", __args[0] } });
+        }); }
+        public static void Victory() { Safe(delegate {
+            if (Plugin.Instance.voluntaryExit || SceneManager.GetActiveScene().name != "Battle") return;
+            var hp = Plugin.Read(Plugin.PlayerConfig(), "currentHP");
+            if (hp == null || Convert.ToSingle(hp) <= 0) return;
+            Plugin.Instance.Emit("battle.victory", new Dictionary<string, object> { { "confirmedVictory", true } });
         }); }
     }
 }

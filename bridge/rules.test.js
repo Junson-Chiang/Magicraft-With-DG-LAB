@@ -119,3 +119,42 @@ test('pending batches cancel on pause, quit, room change, stop, death or timeout
 test('invalid merge windows rejected',()=>{
  for(const mergeWindowMs of [0,99,10001,NaN,500.5])assert.throws(()=>validateConfig({...config,channels:{...config.channels,A:{...mapping,mergeWindowMs}}}));
 });
+
+test('low-health option and enemy multipliers remain bounded and choose waveform',()=>{
+ const t=setup(); t.engine.config=structuredClone(config);const r=t.engine.config.channels.A;
+ r.waveforms.enemy='PULSE';r.enemyMultipliers.Elite=2;
+ t.event('player.damaged',{hpDamage:5,maxHp:100,hpAfter:20,attackerUnitType:'Elite'});
+ assert.equal(t.calls[0][1],13);assert.equal(t.calls[0][5],'PULSE');
+ t.advance(1500);r.lowHealthEnabled=true;r.lowHealthMultiplier=2;
+ t.event('player.damaged',{hpDamage:5,maxHp:100,hpAfter:20,attackerUnitType:'Elite'});
+ assert.equal(t.calls[1][1],20);
+ t.advance(1500);r.enemyMultipliers.Elite=0;
+ t.event('player.damaged',{hpDamage:10,maxHp:100,hpAfter:20,attackerUnitType:'Elite'});
+ assert.equal(t.calls.length,2);
+});
+test('merge preview matches weighted output and uses strongest hit waveform',()=>{
+ const t=setup();t.engine.config=structuredClone(config);const r=t.engine.config.channels.A;
+ Object.assign(r,{mergeDamage:true,mergeWindowMs:500,lowHealthEnabled:true,lowHealthMultiplier:2,sources:['enemy','trap']});r.waveforms.trap='RHYTHM';
+ t.event('player.damaged',{hpDamage:2,maxHp:100,hpAfter:50});t.advance(100);
+ t.event('player.damaged',{hpDamage:4,maxHp:100,hpAfter:20,damageType:'trap'});
+ const preview=t.engine.preview().A;assert.equal(preview.count,2);assert.equal(preview.ratio,0.06);assert.equal(preview.intensity,13);assert.equal(preview.remainingMs,400);
+ t.advance(400);t.engine.tick();assert.equal(t.calls[0][1],preview.intensity);assert.equal(t.calls[0][5],'RHYTHM');assert.equal(t.engine.preview().A,null);
+});
+test('records explain source filter, shield absorption and cooldown; history bounded',()=>{
+ const t=setup();t.event('player.damaged',{hpDamage:0,maxHp:100});assert.match(t.engine.history.find(h=>h.channel==='A').detail,/生命伤害/);
+ t.event('player.damaged',{hpDamage:10,maxHp:100});t.event('player.damaged',{hpDamage:5,maxHp:100});assert.match(t.engine.history.at(-2).detail,/冷却/);
+ for(let i=0;i<100;i++)t.event('player.damaged',{hpDamage:5,maxHp:100});assert.equal(t.engine.history.length,100);
+});
+test('event feedback defaults off, bounds intensity, deduplicates rooms and stops on victory',()=>{
+ const t=setup();t.engine.config=structuredClone(config);const r=t.engine.config.channels.A;
+ t.event('room.entered',{hasBossFight:true,roomKey:'one'});assert.equal(t.calls.length,0);
+ Object.assign(r.eventFeedback.bossEntered,{enabled:true,intensity:100,waveform:'PULSE'});
+ t.event('room.entered',{hasBossFight:true,roomKey:'two'});t.event('room.entered',{hasBossFight:true,roomKey:'two'});
+ assert.equal(t.calls.length,1);assert.equal(t.calls[0][1],20);assert.equal(t.calls[0][5],'PULSE');
+ Object.assign(r.eventFeedback.victory,{enabled:true,intensity:10});
+ t.event('battle.victory',{confirmedVictory:true});assert.equal(t.engine.enabled,false);assert.equal(t.calls.filter(c=>c[0]==='play').length,2);
+ t.event('battle.victory',{confirmedVictory:true});assert.equal(t.calls.filter(c=>c[0]==='play').length,2);
+});
+test('advanced settings reject invalid multipliers, waveform and event duration',()=>{
+ for(const patch of [{lowHealthMultiplier:9},{lowHealthThreshold:0},{waveforms:{...mapping.waveforms,enemy:'invalid'}},{enemyMultipliers:{Monster:1,Elite:NaN,Boss:1}},{eventFeedback:{...mapping.eventFeedback,victory:{enabled:true,intensity:10,durationMs:5000,waveform:'BUBBLE'}}}])assert.throws(()=>validateConfig({...config,channels:{...config.channels,A:{...mapping,...patch}}}));
+});
