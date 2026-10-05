@@ -1,135 +1,264 @@
 # Magicraft × DG-LAB 联动
 
-基于当前 `E:\SteamLibrary\steamapps\common\Magicraft` 的 Unity Mono 程序集分析制作。
-使用 BepInEx 5.4.23.5 x64 和 Harmony。插件仅采集游戏事件，不控制 DG-LAB 设备。
-本地 Node.js 联动程序接收插件事件，通过 DG-LAB V4 SDK 控制选定设备。
+让《Magicraft》的受伤事件触发郊狼反馈。A、B 通道可以分别响应敌人攻击、陷阱等伤害，强度随生命伤害变化；支持短时间内多次受伤合并反馈。主动退出本局不触发死亡反馈。
 
-## A / B 通道伤害分流（0.3.0）
+当前采集插件版本为 **0.4.0**。项目由游戏事件采集插件和电脑端联动程序组成，手机通过 DG-LAB 4 APP 配对。下面是 Windows 从源码安装的完整流程。
 
-两个通道分别勾选要响应的来源：敌人攻击、陷阱、自己/友方、中毒/灼烧（来源不明）、其他/来源不明。
-默认 A 响应敌人攻击，B 响应陷阱。可以让两个通道响应同一种伤害，也可以关闭任一通道。
-强度范围、持续时间、触发间隔及死亡反馈分别设置；A/B 任务和冷却独立，互不覆盖。
-一键“敌人 → A，陷阱 → B”只改变伤害勾选，不提高强度。
-旧配置迁移时保留原通道的强度范围，另一通道最高强度设为 0，需要用户手动填写。
+## 1. 安装前准备
 
-采集优先读取 isTrapDamage；非陷阱通过 attackerEntity 查单位类型，Monster/Elite/Boss 为敌人，
-Player/Teammate/TeammateNotAttack 为自己/友方。法术构造受击数据时，attackerEntity 是 OwnerEntity。
-无法查询攻击者时，中毒/灼烧单独归类，其他保留未知，不把非陷阱伤害一概视为敌人。
-攻击者销毁、环境伤害等可能无法确认来源，面板“最近一次受伤”可用于实测核对。
-插件新增 damageType、attackerUnitType、attackerType；需要重启游戏加载更新。
-
-页面将“满强度伤害比例”改为“扣多少血达到最高强度”，时间统一显示为秒，
-“保存设置（需重新开始）”下方解释归零和重新启用步骤。设备状态显示手机 APP 是否暂停通道输出。
-“停止输出并归零”同时清理 A/B 两个通道。软件不会主动解除手机 APP 的通道静音。
-
-## 启动联动
-
-```powershell
-.\start-bridge.ps1
-```
-
-需要 Node.js 22+。首次恢复源码项目时，在 bridge 中执行 `npm ci` 安装锁定依赖。
-打开终端输出的完整控制面板地址（带 `#` 后的访问令牌）。面板只监听本机 `127.0.0.1:17892`。
-
-1. 点击“连接 / 重新配对”，使用 DG-LAB 4 APP 扫描面板二维码。
-2. 在 APP 中连接并暴露设备，在面板选择郊狼 V2/V3 设备。
-3. 设置最低/最高强度并保存（默认都为 0），选择 A/B 通道后重新选择设备。
-4. 启动游戏，进入活动战斗，收到玩家快照后点击“启用联动”。
-5. 随时点击“停止并归零”；退出联动程序时也会尝试清理任务和归零。
-
-默认中继为 SDK 文档中的 `wss://trex.dungeon-lab.cn/v4`。可以在面板换成自建 V4 中继，
-保存后点击重新配对。联动程序不会自行部署中继服务器。
-运行联动时不要同时启动 `listen.ps1`，两者使用相同 UDP 接收端口。
-
-## 联动规则
-
-伤害比例 = hpDamage / maxHp；强度按最低/最高强度线性映射。
-默认达到最大生命值 20% 的单次伤害时使用最高强度，正常反馈固定 1000ms。
-默认 500ms 冷却；反馈期间只接受更高强度，替换任务时保留原结束时间。
-护盾吸收部分不触发反馈。死亡使用最高强度反馈 3000ms，然后关闭联动。
-房间完成、离开房间、暂停立即清理并归零；恢复后只处理新事件。
-离开 Battle 场景、APP 断开、事件序号缺口、新采集会话、玩家快照超过 5 秒未更新会关闭联动。
-重连后需要手动重新启用。第一版波形固定使用 SDK 的郊狼 BUBBLE，仅支持 COYOTE_020 / COYOTE_030。
-
-V4 的 device.op 响应在任务结束时才返回；程序同时下发波形和临时强度，单独观察完成响应。
-停止不会等待反馈时长，但清理/归零的网络请求仍受链路延迟影响。断网时无法保证远程归零；
-所有强度反馈使用 APP 自动到期归零的临时任务，最长 3 秒。
-未进行真实手机、设备和游戏联合实测。
-
-## 构建与安装
-
-```powershell
-.\build.ps1
-.\install.ps1
-.\listen.ps1
-```
-
-先启动监听器，再通过 Steam 正常启动 Magicraft。安装脚本会拒绝在游戏运行时安装，
-也会拒绝覆盖未知的现有加载器文件。更新插件会备份旧 DLL。
-依赖包位于 `tools/bepinex`，来源为 BepInEx 官方 GitHub 发布；游戏程序集只引用，不复制。
-不需要安装 .NET SDK，构建使用 Windows 自带的 .NET Framework C# 编译器。
-
-## 输出
-
-- UDP：`127.0.0.1:17891`，一个 UTF-8 JSON 数据报对应一个事件。
-- 日志：游戏目录 `BepInEx/MagicraftEvents/*.jsonl`，每次启动生成独立文件。
-- 插件诊断：游戏目录 `BepInEx/LogOutput.log`。
-- 配置：首次启动生成 `BepInEx/config/local.magicraft.eventcollector.cfg`。
-
-```json
-{
-  "schemaVersion": 1,
-  "source": "magicraft",
-  "sessionId": "本次插件会话ID",
-  "sequence": 1,
-  "timestampUtc": "2026-10-06T00:00:00.0000000Z",
-  "event": "player.damaged",
-  "droppedEvents": 0,
-  "data": { "realDamage": 12.5, "scene": "Battle", "stage": 1, "level": 1 }
-}
-```
-
-| 事件 | 含义 / 来源 |
+| 所需项目 | 要求与用途 |
 | --- | --- |
-| `collector.started` | 版本和成功安装的钩子列表；当前应为 6 个 |
-| `collector.stopped` | 插件正常销毁；进程强制终止时无法保证 |
-| `player.damaged` | `PlayerController.AfterTakeDamage`；过滤 immuneDamage 和 realDamage ≤ 0，附带原始伤害、魔法盾伤害、陷阱和暴击标记 |
-| `player.died` | `UIPlayerDead.OnShow`，死亡界面显示时上报 |
-| `room.entered` / `room.left` | `RoomController.RoomEnter/RoomLeave` |
-| `room.completed` | `OnRoomFinish` 的 IsFinish 从 false 变为 true；hasBossFight 表示 Boss 战房间，不等同于单个 Boss 死亡 |
-| `battle.initialized` | `BattleMgr.Start_Normal` 完成，可能包含继续已有战局，不能直接认定为新开一局 |
-| `scene.changed` | Unity 当前活动场景切换，附带 from/to |
-| `time_scale.changed` | 时间倍率变化；0 可用于识别暂停，但加载和演出也可能修改倍率 |
-| `player.snapshot` | 默认每秒读取实际 ECS 玩家数据：hp、maxHp、shield、temporaryShield、coins、keys |
+| Windows 64 位电脑 | 本项目脚本与构建流程面向 Windows |
+| Steam 版 Magicraft | 当前按 Unity Mono 版本制作；游戏更新后需要核对采集日志 |
+| Node.js | 22 或以上，用来运行联动程序；可从 [Node.js 官网](https://nodejs.org/en/download) 下载 Windows x64 安装程序，安装时保留 npm 和 PATH 选项 |
+| BepInEx | 使用 [官方 5.4.23.5 发布页](https://github.com/BepInEx/BepInEx/releases/tag/v5.4.23.5) 的 `BepInEx_win_x64_5.4.23.5.zip`，不要使用 x86、Unix、IL2CPP 或 BepInEx 6 包 |
+| 手机与设备 | 安装 DG-LAB 4 APP，并在 APP 中连接郊狼 V2/V3；桥接支持 COYOTE_020 / COYOTE_030 |
+| 网络 | 电脑和手机均需能连接配置的 V4 中继服务器 |
 
-所有事件附带 scene/stage/level；无对应战斗实例时 stage/level 为 null。
-房间事件附带 roomId、roomType、theme、hasBossFight。
-0.2.0 的受伤事件增加 `hpDamage`、`maxHp`、`hpAfter`。
-经 UnitPropertyJob.Execute 的 IL 核对，`realDamage` 累计了普通/临时护盾吸收量。
-`hpDamage` 使用护盾结算后剩余的 damage 字段，表示作用于生命值的伤害，过量致死伤害可能超过死亡前剩余 HP；
-它不是按两次每秒快照相减计算的。`rawDamage` 为兼容旧输出保留，实际上同样是该结算后字段。
-快照增加 timeScale，倍率变更采集每帧检查，以及时捕获暂停。
+源码仓库不包含游戏程序集、BepInEx 压缩包、编译好的插件或 node_modules；下载源码后需要执行下面的准备和编译步骤。不需要安装 Visual Studio 或 .NET SDK，构建使用 Windows 的 .NET Framework C# 编译器。
 
-输出在独立线程执行，队列最多 1024 条，满时丢弃新事件并累计 droppedEvents。
-UDP 不保证送达，接收端用 sessionId 和 sequence 去重、检查缺口；JSONL 用于回溯。
-会话日志暂不自动轮转清理。第一版没有实现敌人击杀、胜利、拾取物品事件。
+安装前关闭 Magicraft。设备与电极的使用位置、连接方式按设备说明操作；本软件只提供通道分流，不判断电极放置是否合适。
 
-## 验证
+## 2. 下载源码并找到游戏目录
 
-`cd bridge; npm test`：规则映射、护盾过滤、连续受击、暂停/死亡、超时/重复消息、
-设备任务并发与停止，以及模拟 V4 APP + 游戏 UDP + HTTP 面板的完整链路。
+在 [项目仓库](https://github.com/Junson-Chiang/Magicraft-With-DG-LAB) 点击 **Code → Download ZIP**，解压到独立文件夹，例如 `F:\Magicraft-With-DG-LAB`。不要只打开压缩包，也不要将源码直接解压进游戏目录。
 
-`tools/verify-output.ps1` 验证实际输出组件的 UDP / JSONL 格式和停止排空。
-编译和程序集签名检查不能替代游戏内实测。首次运行请检查日志有 `6/6 hooks`，
-然后进入战斗、受击、清理房间、暂停、死亡，核对监听器输出。
-游戏更新可能改变入口；失败钩子会单独记录，其他采集继续工作。
+也可以使用 Git：
 
-临时禁用：游戏关闭后把 `BepInEx/plugins/MagicraftEventCollector/MagicraftEventCollector.dll`
-移出 plugins 目录。完全撤回加载器时，仅移除本次安装新增的加载器文件，不删除游戏文件。
+```powershell
+git clone https://github.com/Junson-Chiang/Magicraft-With-DG-LAB.git
+cd Magicraft-With-DG-LAB
+```
 
-0.4.0 更新：主动确认退出本局会发送 battle.exited，菜单 FromUI 伤害不作为受伤或死亡。player.died 增加 confirmedDeath 标记，桥接只对确认的死亡输出反馈。
+打开 Steam，右键 Magicraft → **管理 → 浏览本地文件**。记下包含 `Magicraft.exe` 和 `Magicraft_Data` 的文件夹路径。
 
-A、B 通道新增“把短时间内的多次受伤合成一次反馈”，默认关闭，时间范围 0.1–10 秒（默认 0.5 秒）。从首次有效受伤起固定计时，将窗口内选中的生命伤害比例相加，到期按原强度映射输出一次并限制在通道上限内。合并模式替代触发间隔限制；暂停、退出、房间结束、停止、采集断开会清空待合并事件。
+本项目脚本默认路径是 `E:\SteamLibrary\steamapps\common\Magicraft`，其他电脑请在后面的命令中传入自己的路径。
 
-首次运行会从 bridge/config.example.json 创建本地 bridge/config.json，默认两个通道最高强度均为 0。本地配置不提交到 Git。
+## 3. 准备 BepInEx 文件
 
+从上面的官方发布页下载 Windows x64 ZIP，将**压缩包内的文件**解压到项目的 `tools\bepinex` 文件夹。最终结构应为：
+
+```text
+Magicraft-With-DG-LAB\
+├─ build.ps1
+├─ install.ps1
+├─ start-bridge.ps1
+├─ src\
+├─ bridge\
+│  ├─ main.js
+│  └─ config.example.json
+└─ tools\
+   └─ bepinex\
+      ├─ BepInEx\
+      │  └─ core\
+      │     ├─ BepInEx.dll
+      │     └─ 0Harmony.dll
+      ├─ winhttp.dll
+      ├─ doorstop_config.ini
+      └─ .doorstop_version
+```
+
+不要多嵌套一层 `BepInEx_win_x64_5.4.23.5` 文件夹。检查 `tools\bepinex\BepInEx\core\BepInEx.dll` 存在即可确认路径正确。
+
+## 4. 安装 Node.js 依赖
+
+在项目根目录打开 PowerShell：可以在资源管理器地址栏输入 `powershell` 并回车。以下命令均在这个窗口执行。
+
+```powershell
+node --version
+npm.cmd --version
+cd bridge
+npm.cmd ci
+cd ..
+```
+
+`node --version` 应显示 v22 或更高。`npm.cmd ci` 按锁定版本安装依赖，成功后会生成 `bridge\node_modules`。使用 `.cmd` 可以避免 Windows 对 npm.ps1 的执行策略限制。
+
+如果提示找不到 node/npm，安装 Node.js 后关闭当前终端，重新打开再试。
+
+## 5. 编译并安装游戏采集插件
+
+先将下面的 `$gamePath` 改为你的游戏目录，然后执行：
+
+```powershell
+$gamePath = 'E:\SteamLibrary\steamapps\common\Magicraft'
+powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -GamePath $gamePath
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -GamePath $gamePath
+```
+
+这里的 ExecutionPolicy 参数只作用于这次启动的 PowerShell，不修改系统永久执行策略。
+
+编译成功会显示 `Built dist\MagicraftEventCollector.dll`。安装成功会显示插件目标路径：
+
+```text
+<游戏目录>\BepInEx\plugins\MagicraftEventCollector\MagicraftEventCollector.dll
+```
+
+安装脚本会在没有 BepInEx 时复制加载器；已经有 BepInEx 时只安装插件。游戏运行时会拒绝安装，更新插件时会备份旧 DLL。若发现未知的 `winhttp.dll`、`doorstop_config.ini` 等现有加载器文件，脚本会拒绝覆盖：先确认已有 Mod 加载器的来源与兼容性，再安装。
+
+通过 Steam 启动一次游戏，再查看：
+
+```text
+<游戏目录>\BepInEx\LogOutput.log
+```
+
+应看到 `Event collector ready: 7/7 hooks`。如果日志不存在或出现 `Hook unavailable`，先按下面的常见问题排查。插件更新后需要重新启动游戏，已运行的游戏不会自动加载新 DLL。
+
+## 6. 启动电脑联动程序
+
+回到项目根目录执行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\start-bridge.ps1
+```
+
+也可以直接运行：
+
+```powershell
+cd bridge
+node main.js
+```
+
+保持这个终端打开。首次运行会从 `bridge/config.example.json` 创建 `bridge/config.json`，默认两个通道的最高强度均为 **0**。
+
+复制终端显示的**完整控制面板链接**到浏览器，包含 `#` 后的访问令牌，例如：
+
+```text
+http://127.0.0.1:17892/#<本次启动生成的令牌>
+```
+
+只输入端口地址会缺少访问令牌。面板仅供这台电脑访问，手机用 APP 扫描配对二维码，不需要打开电脑的 localhost 页面。每次重启联动程序，请使用新输出的链接。
+
+运行联动程序时不要同时运行 `listen.ps1`，两者会占用相同的 UDP 端口。
+
+## 7. 手机配对与设备选择
+
+1. 在手机 DG-LAB 4 APP 中连接郊狼设备。
+2. 在电脑面板点击 **生成手机配对码**，用 APP 的配对扫码功能扫描二维码，并按 APP 提示将设备提供给此连接。
+3. 等待电脑显示手机已连接，设备下拉框出现对应郊狼。
+4. 选择设备，点击 **使用此设备**。这个动作会将两个通道归零。
+5. 检查面板的 A、B 通道状态。要使用的通道必须在手机 APP 中开启输出；如显示“手机 APP 已暂停输出”，先到 APP 开启对应通道。
+
+默认中继地址为 `wss://trex.dungeon-lab.cn/v4`。如需修改，在“连接地址（通常无需修改）”中填写兼容的 V4 中继地址并保存，再重新生成配对码。软件不会自动部署中继。
+
+## 8. 配置 A、B 通道并开始测试
+
+A、B 各有独立配置。默认 **A 响应敌人攻击，B 响应陷阱伤害**。点击“敌人 → A，陷阱 → B”可以恢复这组伤害勾选，但不会改变强度。
+
+| 面板选项 | 含义 |
+| --- | --- |
+| 使用此通道 | 是否处理这个通道的游戏事件 |
+| 伤害来源勾选 | 仅响应选中的来源；同一来源在 A/B 都选中时会触发两个通道 |
+| 轻微受伤时的强度 | 强度映射的起点 |
+| 单次反馈的最高强度 | 输出上限；0 表示不产生反馈 |
+| 扣多少血达到最高强度 (%) | 按生命上限计算。例如 20 表示损失生命上限的 20% 时达到最高强度 |
+| 每次反馈持续几秒 | 单次反馈时长，范围 0.1–3 秒 |
+| 两次触发至少间隔几秒 | 普通模式的触发间隔；正在反馈时，更大伤害可以提高强度，但不会延长原结束时间 |
+| 把短时间内的多次受伤合成一次反馈 | 开启后先收集伤害，窗口结束再输出一次 |
+| 收集合并伤害的时间（秒） | 范围 0.1–10 秒，默认 0.5 秒；从首次有效受伤开始固定计时 |
+| 死亡时也触发此通道 | 真正死亡时使用该通道最高强度，随后关闭联动；主动退出本局不触发 |
+| 死亡时反馈几秒 | 死亡反馈时长，范围 0.1–3 秒 |
+
+合并模式会将窗口内**该通道选中的生命伤害比例相加**，然后按同一强度公式计算一次反馈。例如窗口 0.5 秒内受到 2% 和 3% 的生命伤害，按合计 5% 计算；最高强度仍是上限。后续受伤不延长窗口，合并模式不使用普通触发间隔设置。开启后出现等待窗口结束的延迟是正常行为。
+
+强度计算公式：
+
+```text
+伤害比例 = 生命伤害 / 最大生命值
+强度 = 最低强度 + (最高强度 - 最低强度) × min(伤害比例 / 满强度比例, 1)
+```
+
+仅计算作用于生命值的伤害，护盾吸收部分不触发。中毒/灼烧在无法确认攻击者时会单列为“来源不明”；无法识别的其他伤害不会自动归为敌人。
+
+测试步骤：
+
+1. 勾选需要的通道与伤害来源，填写适合自己的强度和时长。软件没有适用于所有人的固定强度推荐。
+2. 点击 **保存设置（需重新开始）**。保存会结束当前反馈、清空待合并伤害并将 A/B 归零，手机配对保留。
+3. 在游戏中进入一局活动战斗。面板应显示“战斗中”和玩家生命值，不能处于暂停状态。
+4. 点击 **开始响应游戏伤害**。至少一个启用通道的最高强度须大于 0。
+5. 受伤后查看“最近一次受伤”的来源和生命伤害，核对是否匹配所选通道。合并模式下等待设定窗口结束。
+6. 点击 **停止输出并归零** 可随时停止两个通道。
+
+暂停、离开房间、房间完成会结束当前输出并丢弃待合并伤害。主动退出本局、真正死亡、离开战斗场景、连接断开或采集异常会关闭联动；恢复后根据面板提示重新点击“开始响应游戏伤害”。不要将面板显示“手机已连接”误认为联动已经开启。
+
+## 9. 常见问题
+
+| 现象 | 排查方法 |
+| --- | --- |
+| Missing dependency | 检查 BepInEx 解压层级，以及 GamePath 是否包含正确的 Magicraft_Data\Managed；本插件不适用于不同运行时的游戏版本 |
+| Close Magicraft before installing | 完全退出游戏，再执行安装命令 |
+| PowerShell 提示禁止运行脚本 | 使用教程中的 `powershell -ExecutionPolicy Bypass -File ...` 命令；安装依赖使用 `npm.cmd` |
+| 没有 BepInEx 日志 | 检查游戏根目录是否有加载器文件和 BepInEx/core；从 Steam 启动后再查日志，避免重复加载器冲突 |
+| 不是 7/7 hooks | 查看 Hook unavailable 的具体方法；确认插件版本、游戏版本及是否重启了游戏 |
+| EADDRINUSE | 相同端口被占用；关闭旧联动进程或 listen.ps1 后重试。默认 UDP 17891、HTTP 17892 |
+| 面板访问失败 | 从当前终端重新复制包含令牌的完整链接；确认终端仍在运行 |
+| 扫码后没有设备 | 检查手机 APP 是否已连接设备并将设备提供给配对连接，以及两端中继地址是否一致、网络是否可用 |
+| “需要游戏处于活动战斗中” | 进入战斗、关闭暂停菜单；检查生命值快照是否更新、插件 UDP 是否开启 |
+| 受伤但没有感觉 | 检查已点击“开始响应游戏伤害”、已选设备、对应通道最高强度大于 0、APP 未暂停输出；再核对最近受伤来源是否勾选、是否仅护盾受伤、是否正在等待合并窗口 |
+| 保存后不再响应 | 保存会停止输出；再次点击“开始响应游戏伤害” |
+| B 通道没有反馈 | 新配置 B 最高强度默认 0，需要自行设置；检查陷阱伤害勾选和手机 B 通道状态 |
+| 游戏更新后采集异常 | 检查插件日志钩子与伤害来源；程序集入口改变可能需要更新插件 |
+
+采集插件配置文件位于 `<游戏目录>\BepInEx\config\local.magicraft.eventcollector.cfg`。默认 UDP 开启，端口为 17891；若手动改端口，必须与本地 `bridge/config.json` 的 udpPort 一致。采集快照默认每秒一次，超过 5 秒未更新会关闭联动。
+
+网络断开时无法保证电脑能立即让远程设备归零；程序使用自动到期的临时强度任务，单次输出最长 3 秒。需要立刻终止时使用手机 APP 或设备的停止操作。
+
+## 10. 更新、禁用和卸载
+
+更新源码后，关闭游戏和联动终端，重新安装依赖、编译并安装：
+
+```powershell
+# 使用 Git 下载的项目先执行 git pull；ZIP 用户下载新版覆盖源码。
+cd bridge
+npm.cmd ci
+cd ..
+$gamePath = 'E:\SteamLibrary\steamapps\common\Magicraft'
+powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -GamePath $gamePath
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -GamePath $gamePath
+powershell -NoProfile -ExecutionPolicy Bypass -File .\start-bridge.ps1
+```
+
+重新启动游戏、扫码配对并选择设备。本地 `bridge/config.json` 保存个人设置，不提交到仓库；ZIP 更新时保留这个文件。
+
+临时禁用插件：游戏关闭后，将 `BepInEx\plugins\MagicraftEventCollector\MagicraftEventCollector.dll` 移出 plugins 目录。只卸载本插件时不要删除其他 Mod 文件。只有确认加载器是本项目首次安装、且没有其他插件依赖时，才按安装记录移除新增的 BepInEx 加载器文件。
+
+## 开发与事件诊断
+
+完整测试：
+
+```powershell
+cd bridge
+npm.cmd test
+```
+
+测试覆盖规则映射、护盾过滤、伤害分流、合并窗口、退出/死亡、暂停、超时、设备任务和模拟 V4 APP + UDP + HTTP 链路。模拟测试不能代替真实游戏、手机与设备联合测试。
+
+仅调试采集事件时，在项目根目录执行以下命令，再启动游戏（此时不要运行联动程序）：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\listen.ps1
+```
+
+| 输出位置 | 内容 |
+| --- | --- |
+| UDP 127.0.0.1:17891 | 一个 UTF-8 JSON 数据报对应一个事件 |
+| 游戏目录 BepInEx/MagicraftEvents/*.jsonl | 每次启动的独立事件日志 |
+| 游戏目录 BepInEx/LogOutput.log | 插件加载和钩子诊断 |
+| bridge/config.json | 个人联动设置，首次启动自动生成 |
+
+| 事件 | 含义 |
+| --- | --- |
+| collector.started / collector.stopped | 插件启动/正常销毁；启动包含版本和 7 个钩子状态 |
+| player.damaged | 生命伤害、最大生命值、伤害来源、攻击者类型、陷阱/暴击标记等 |
+| player.died | 确认的死亡，附带 confirmedDeath 标记 |
+| battle.exited | 菜单主动退出，停止联动，不触发死亡反馈 |
+| battle.initialized | BattleMgr.Start_Normal 完成，可能包含继续已有战局 |
+| room.entered / room.left / room.completed | 房间进入、离开、完成；房间完成不等同于单个 Boss 死亡 |
+| scene.changed / time_scale.changed | 活动场景与游戏时间倍率变化 |
+| player.snapshot | 实际 ECS 玩家生命、护盾、钱币、钥匙和时间倍率，默认每秒采集 |
+
+所有事件带 schemaVersion、source、sessionId、sequence、timestampUtc、data；data 附带 scene/stage/level。UDP 不保证送达，桥接用会话和序号检查重复与缺口。事件日志暂不自动清理。
+
+`hpDamage` 来自护盾结算后的 damage 字段，过量致死伤害可能超过受伤前剩余生命；`realDamage` 包含普通/临时护盾吸收量，不能用作纯生命伤害。来源优先检查陷阱标记，再根据攻击者单位分类；无法确认时保留未知。
+
+当前没有敌人击杀、胜利或物品拾取反馈。波形固定使用 SDK 的 BUBBLE；通信由 dglab-kit V4 SDK 完成，不自动部署原始 WebSocket 服务器。
