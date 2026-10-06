@@ -34,7 +34,7 @@ export function validateConfig(c) {
     for(const k of ['Monster','Elite','Boss']) if(!Number.isFinite(rule.enemyMultipliers?.[k])||rule.enemyMultipliers[k]<0||rule.enemyMultipliers[k]>5)throw Error(channel+' 敌人倍率无效');
     for(const k of Object.keys(SOURCE_LABELS)) if(!Object.hasOwn(WAVEFORMS,rule.waveforms?.[k]))throw Error(channel+' 波形无效');
     for(const k of Object.keys(EVENT_LABELS)) {const e=rule.eventFeedback?.[k]; if(!e||typeof e.enabled!=='boolean'||!Number.isInteger(e.intensity)||e.intensity<0||e.intensity>200||!Number.isInteger(e.durationMs)||e.durationMs<100||e.durationMs>3000||!Object.hasOwn(WAVEFORMS,e.waveform))throw Error(channel+' 事件设置无效');}
-    if (rule.minIntensity > rule.maxIntensity) throw new Error(`${channel} 通道最低强度不能超过最高强度`);
+    if (rule.minIntensity > rule.maxIntensity) throw new Error(`${channel} 通道强度下限不能超过强度上限`);
   }
   const url = new URL(c.relayUrl);
   if (!['ws:', 'wss:'].includes(url.protocol) || url.search) throw new Error('中继地址必须为不含查询参数的 ws/wss 地址');
@@ -95,7 +95,7 @@ export class RuleEngine {
   enable() {
     if (!this.lastSnapshot || this.now() - this.lastSnapshot > this.config.collectorTimeoutMs || this.scene !== 'Battle' || this.paused || this.dead)
       throw new Error('需要游戏处于活动战斗中，并收到新鲜的玩家快照');
-    if (!Object.values(this.config.channels).some(c => c.enabled && c.maxIntensity > 0)) throw new Error('至少开启一个通道，并设置大于 0 的最高强度');
+    if (!Object.values(this.config.channels).some(c => c.enabled && c.maxIntensity > 0)) throw new Error('至少开启一个通道，并设置大于 0 的强度上限');
     this.enabled = true;
     this.reason = '联动已启用';
     this.resetChannels();
@@ -199,7 +199,7 @@ export class RuleEngine {
       const raw=damageIntensity(d,rule), mod=modifiers({...d,damageType:source},rule,this.snapshot);
       const mapped=raw&&damageIntensity({hpDamage:raw.ratio*mod.multiplier,maxHp:1},rule);
       const waveform=rule.waveforms[source];
-      if (!mapped || rule.maxIntensity <= 0) {this.record(channel,'未输出',!mapped?'无有效生命伤害（可能仅护盾受伤）':'最高强度为 0',{source});continue;}
+      if (!mapped || rule.maxIntensity <= 0) {this.record(channel,'未输出',!mapped?'无有效生命伤害（可能仅护盾受伤）':'强度上限为 0',{source});continue;}
       if (rule.mergeDamage) {
         this.flushBatch(channel);
         if (!state.batch) state.batch = { until: now + rule.mergeWindowMs, ratio: 0, weightedRatio:0, waveform, count: 0 };
