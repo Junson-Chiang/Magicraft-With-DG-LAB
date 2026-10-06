@@ -25,7 +25,7 @@ export function validateConfig(c) {
     if (!rule || typeof rule.enabled !== 'boolean' || typeof rule.deathFeedback !== 'boolean' || typeof rule.mergeDamage !== 'boolean') throw new Error(`${channel} 通道设置不完整`);
     if (!Array.isArray(rule.sources) || rule.sources.length > 5 || new Set(rule.sources).size !== rule.sources.length || rule.sources.some(s => !Object.hasOwn(SOURCE_LABELS, s))) throw new Error(`${channel} 通道伤害类型无效`);
     if (rule.enabled && !rule.sources.length) throw new Error(`${channel} 通道至少选择一种伤害`);
-    for (const [key, lo, hi, integer] of [['minIntensity', 0, 100, true], ['maxIntensity', 0, 100, true],
+    for (const [key, lo, hi, integer] of [['minIntensity', 0, 200, true], ['maxIntensity', 0, 200, true],
       ['fullScaleDamageRatio', 0.01, 1, false], ['mergeWindowMs', 100, 10000, true], ['durationMs', 100, 3000, true], ['cooldownMs', 100, 3000, true], ['deathDurationMs', 100, 3000, true]]) {
       if (!Number.isFinite(rule[key]) || rule[key] < lo || rule[key] > hi || (integer && !Number.isInteger(rule[key]))) throw new Error(`${channel} 通道 ${key} 设置无效 (${lo}–${hi})`);
     }
@@ -33,7 +33,7 @@ export function validateConfig(c) {
     for(const [key,lo,hi] of [['lowHealthThreshold',0.01,1],['lowHealthMultiplier',1,5]]) if(!Number.isFinite(rule[key])||rule[key]<lo||rule[key]>hi)throw Error(channel+' '+key+' 无效');
     for(const k of ['Monster','Elite','Boss']) if(!Number.isFinite(rule.enemyMultipliers?.[k])||rule.enemyMultipliers[k]<0||rule.enemyMultipliers[k]>5)throw Error(channel+' 敌人倍率无效');
     for(const k of Object.keys(SOURCE_LABELS)) if(!Object.hasOwn(WAVEFORMS,rule.waveforms?.[k]))throw Error(channel+' 波形无效');
-    for(const k of Object.keys(EVENT_LABELS)) {const e=rule.eventFeedback?.[k]; if(!e||typeof e.enabled!=='boolean'||!Number.isInteger(e.intensity)||e.intensity<0||e.intensity>100||!Number.isInteger(e.durationMs)||e.durationMs<100||e.durationMs>3000||!Object.hasOwn(WAVEFORMS,e.waveform))throw Error(channel+' 事件设置无效');}
+    for(const k of Object.keys(EVENT_LABELS)) {const e=rule.eventFeedback?.[k]; if(!e||typeof e.enabled!=='boolean'||!Number.isInteger(e.intensity)||e.intensity<0||e.intensity>200||!Number.isInteger(e.durationMs)||e.durationMs<100||e.durationMs>3000||!Object.hasOwn(WAVEFORMS,e.waveform))throw Error(channel+' 事件设置无效');}
     if (rule.minIntensity > rule.maxIntensity) throw new Error(`${channel} 通道最低强度不能超过最高强度`);
   }
   const url = new URL(c.relayUrl);

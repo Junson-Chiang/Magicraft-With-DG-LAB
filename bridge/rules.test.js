@@ -158,3 +158,11 @@ test('event feedback defaults off, bounds intensity, deduplicates rooms and stop
 test('advanced settings reject invalid multipliers, waveform and event duration',()=>{
  for(const patch of [{lowHealthMultiplier:9},{lowHealthThreshold:0},{waveforms:{...mapping.waveforms,enemy:'invalid'}},{enemyMultipliers:{Monster:1,Elite:NaN,Boss:1}},{eventFeedback:{...mapping.eventFeedback,victory:{enabled:true,intensity:10,durationMs:5000,waveform:'BUBBLE'}}}])assert.throws(()=>validateConfig({...config,channels:{...config.channels,A:{...mapping,...patch}}}));
 });
+
+test('supports intensity 200 for channels and events, rejects 201 and decimals',()=>{
+ const c=structuredClone(config);c.channels.A.minIntensity=120;c.channels.A.maxIntensity=200;c.channels.A.eventFeedback.victory.intensity=200;
+ assert.doesNotThrow(()=>validateConfig(c));assert.equal(damageIntensity({hpDamage:100,maxHp:100},c.channels.A).intensity,200);
+ for(const key of ['minIntensity','maxIntensity'])for(const value of [-1,201,150.5]){const bad=structuredClone(c);bad.channels.A[key]=value;assert.throws(()=>validateConfig(bad));}
+ for(const value of [-1,201,150.5]){const bad=structuredClone(c);bad.channels.A.eventFeedback.victory.intensity=value;assert.throws(()=>validateConfig(bad));}
+ const t=setup();t.engine.config=structuredClone(config);t.engine.config.channels.A.maxIntensity=200;t.event('player.damaged',{hpDamage:100,maxHp:100});assert.equal(t.calls[0][1],200);
+});
